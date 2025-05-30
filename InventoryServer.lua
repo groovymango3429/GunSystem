@@ -593,7 +593,12 @@ function InventoryServer.HoldItem(player: Player, slotNum: number)
 		local tool: Tool = stackData.Items[1]
 		if not player.Character then return end
 		tool.Parent = player.Character
-		
+		if stackData.ItemType == "Weapon" then
+			print(stackData.Name)
+			game.ReplicatedStorage.Events.EquipViewmodel:FireClient(player, stackData.Name)
+		else
+			game.ReplicatedStorage.Events.UnequipViewmodel:FireClient(player)
+		end
 		--Updating Client
 		Signal.FireClient(player, "InventoryClient:Update", inv)
 		
