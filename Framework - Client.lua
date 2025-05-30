@@ -1,535 +1,487 @@
---Services
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local RS = game:GetService("ReplicatedStorage")
-local SG = game:GetService("StarterGui")
-local TS = game:GetService("TweenService")
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
 
---Modules
-local Janitor = require(RS.Modules.Janitor)
-local Signal = require(RS.Modules.Signal)
-local Types = require(RS.Modules.Types)
+local humanoid = character:WaitForChild("Humanoid")
 
---Player Variables
-local player = Players.LocalPlayer
-local playerGui = player.PlayerGui
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
---Gui Variables
-local gui = playerGui:WaitForChild("Inventory")
-local hotbarF = gui:WaitForChild("Hotbar")
-local invF = gui:WaitForChild("Inventory"); invF.Visible = false
-local invB = gui:WaitForChild("Open")
-local errorT = gui:WaitForChild("Error"); errorT.Visible = false
+local camera = game.Workspace.CurrentCamera
 
-local infoF = invF:WaitForChild("ItemInfo"); --infoF.Visible = false
-local itemNameT = infoF:WaitForChild("ItemName")
-local itemDescT = infoF:WaitForChild("ItemDesc")
-local equipB = infoF:WaitForChild("Equip")
-local dropB = infoF:WaitForChild("Drop")
-local instructT = infoF:WaitForChild("Instructions"); instructT.Visible = false
+local dof = game.Lighting.DepthOfField
 
-local itemsSF = invF:WaitForChild("ItemsScroll")
-local itemSample = itemsSF:WaitForChild("Sample"); itemSample.Visible = false
+local aimCF = CFrame.new()
 
-local armorF = invF:WaitForChild("Armor")
-local armorInnerF = armorF:WaitForChild("Inner")
 local mouse = player:GetMouse()
 
-local hotbarSlots = {
-	hotbarF.Slot1,
-	hotbarF.Slot2,
-	hotbarF.Slot3,
-	hotbarF.Slot4,
-	hotbarF.Slot5,
-	hotbarF.Slot6,
-	hotbarF.Slot7,
-	hotbarF.Slot8
+local playerGui = player.PlayerGui
+local gui = playerGui:WaitForChild("Inventory")
+local invF = gui:WaitForChild("Inventory")
+
+local isAiming = false
+local isShooting = false
+local isReloading = false
+local isSprinting = false
+local canShoot = true
+local canInspect = true
+
+local bobOffset = CFrame.new()
+
+local debounce = false
+
+local currentSwayAMT = -.3
+local swayAMT = -.3
+local aimSwayAMT = .2
+local swayCF = CFrame.new()
+local lastCameraCF = CFrame.new()
+
+local fireAnim = nil
+local equipAnim = nil
+local deequipAnim = nil
+local emptyfireAnim = nil
+local reloadAnim = nil
+local emptyReloadAnim = nil
+local InspectAnim = nil
+local idleAnim = nil
+
+local framework = {
+	inventory = {
+		"TROY DEFENSE AR";
+		"G19 ROLAND SPECIAL";
+	};
+
+	module = nil;
+	viewmodel = nil;
+	currentSlot = 1; 
 }
 
+function loadSlot(Item)
+	local viewmodelFolder = game.ReplicatedStorage.Viewmodels
+	local moduleFolder = game.ReplicatedStorage.Modules
 
+	canShoot = false
+	canInspect = false
 
-local keysToSlots = {
-	[Enum.KeyCode.One] = hotbarF.Slot1;
-	[Enum.KeyCode.Two] = hotbarF.Slot2;
-	[Enum.KeyCode.Three] = hotbarF.Slot3;
-	[Enum.KeyCode.Four] = hotbarF.Slot4;
-	[Enum.KeyCode.Five] = hotbarF.Slot5;
-	[Enum.KeyCode.Six] = hotbarF.Slot6;
-	[Enum.KeyCode.Seven] = hotbarF.Slot7;
-	[Enum.KeyCode.Eight] = hotbarF.Slot8;
-	
-}
-
-local armorSlots = {
-	Head = armorInnerF.Head;
-	Chest = armorInnerF.Chest;
-	Feet= armorInnerF.Boots;
-}
-
---Module
-local InventoryClient = {}
-InventoryClient.OpenPosition = invF.Position
-InventoryClient.ClosePosition = invF.Position + UDim2.fromScale(0,1)
-InventoryClient.OpenCloseDb = false
-InventoryClient.IsOpen = false
- 
-InventoryClient.InvData = nil
-InventoryClient.SelectedStackId = nil
-InventoryClient.UpdatingDb = false
-
-InventoryClient.EquipInstructText = instructT.Text
-InventoryClient.HeldSlotNum = nil
-
-InventoryClient.ErrorDb = false
-InventoryClient.ErrorPosition = errorT.Position;
-InventoryClient.ErrorTime = 2
-
-function InventoryClient.Start()
-	
-	---Dsiable
-	SG:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
-	--Updating Inventory
-	InventoryClient.UpdateInventoryData()
-	InventoryClient.UpdateDisplay()
-	InventoryClient.UpdateHeldItem()
-	
-	---Connecting signals
-	Signal.ListenRemote("InventoryClient:Update", function(newInvData: Types.Inventory)
-		InventoryClient.InvData = newInvData
-		InventoryClient.UpdateDisplay()
-		InventoryClient.UpdateHeldItem()
-	end)
-	Signal.ListenRemote("InventoryClient:ErrorMessage", InventoryClient.ErrorMessage)
-	
-	--Open/Close
-	UIS.InputBegan:Connect(InventoryClient.OnInputBegan)
-	invB.MouseButton1Click:Connect(function()
-		InventoryClient.SetWindowOpen(not InventoryClient.IsOpen)
-	end)
-	
-	
-	--Connecting buttons
-	equipB.MouseButton1Up:Connect(InventoryClient.OnEquipButton)
-	dropB.MouseButton1Up:Connect(InventoryClient.OnDropButton)
-	
-	--Connecting slot buttons
-	for i, slotF: TextButton in hotbarSlots do
-		slotF.MouseButton1Click:Connect(function()
-			InventoryClient.ToggleHold(i)
-		end)
-	end
-	
-end
-
---Input began
-function InventoryClient.OnInputBegan(input: InputObject, gameProcessedEvent: boolean)
-	if gameProcessedEvent then return end
-	if input.KeyCode == Enum.KeyCode.B then
-		InventoryClient.SetWindowOpen(not InventoryClient.IsOpen)
-	end
-	
-	--Equipping Slots
-	for key: Enum.KeyCode, slotF: TextButton in keysToSlots do
-		if input.KeyCode == key then
-			InventoryClient.ToggleHold(table.find(hotbarSlots, slotF))
-			break
+	for i,v in pairs(camera:GetChildren()) do
+		if v:IsA("Model") then
+			equipAnim:Stop()
+			fireAnim:Stop()
+			emptyfireAnim:Stop()
+			reloadAnim:Stop()
+			emptyReloadAnim:Stop()
+			InspectAnim:Stop()
+			idleAnim:Stop()
+			deequipAnim:Play()
+			repeat task.wait() until deequipAnim.IsPlaying == false
+			v:Destroy()
 		end
 	end
-end
 
---opening and closing
-function InventoryClient.SetWindowOpen(toSet: boolean)
-	if InventoryClient.OpenCloseDb then return end
-	InventoryClient.OpenCloseDb = true
-	
-	--checking toset
-	if toSet == true then
+	if moduleFolder:FindFirstChild(Item) then
+		framework.module = require(moduleFolder:FindFirstChild(Item))
 
-		
-		UIS.MouseIconEnabled = true
-		invF.Position = InventoryClient.ClosePosition
-		invF.Visible = true
-		invF:TweenPosition(InventoryClient.OpenPosition, Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.5)
-		task.wait(.5)
-		InventoryClient.IsOpen = true
-	else
-		UIS.MouseIconEnabled = false
-		invF:TweenPosition(InventoryClient.ClosePosition, Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.5)
-		task.wait(0.5)
-		invF.Visible = false
-		InventoryClient.IsOpen = false
-	end
-	
-	InventoryClient.OpenCloseDb = false
-end
+		if viewmodelFolder:FindFirstChild(Item) then
+			framework.viewmodel = viewmodelFolder:FindFirstChild(Item):Clone()
+			framework.viewmodel.Parent = camera
 
---Equip Button
-function InventoryClient.OnEquipButton()
-	
-	--Finding stack id
-	local stackData = InventoryClient.FindStackDataFromID(InventoryClient.SelectedStackId)
-	
-	--Checking button mode
-	if equipB.Text == "Equip" and stackData ~= nil then
-		
-		--Instructions
-		local tempJanitor = Janitor.new()
-		instructT.Visible = true; tempJanitor:GiveChore(function() instructT.Visible = false end)
-		equipB.Text = "<-->"; tempJanitor:GiveChore(function() equipB.Text = "Equip" end)
-		
-		--Checking item Type
-		if stackData.ItemType == "Armor" then
-			tempJanitor:Clean()
-			
-			--Equipping to armor Slot
-			local success = Signal.InvokeServer("InventoryServer:EquipArmor", stackData.StackId)
-			if not success then
-				InventoryClient.ErrorMessage("Something went wrong while equipping armor!")
-				return 
-			end
-			
-		else
-			
-			--variables
-			local chosenSlot: TextButton = nil
-			local slotNum: number = nil
-			
-			--Keyboard inputs
-			tempJanitor:GiveChore(UIS.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
-				if gameProcessedEvent then return end 
-				if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-				
-				---Selecting slot
-				for key: Enum.KeyCode, slotF: TextButton in keysToSlots do
-					if input.KeyCode == key then 
-						chosenSlot = slotF
-						tempJanitor:Clean()
-						return
+			if framework.viewmodel and framework.module and character then
+				fireAnim = Instance.new("Animation")
+				fireAnim.Parent = framework.viewmodel
+				fireAnim.Name = "Fire"
+				fireAnim.AnimationId = framework.module.fireAnim
+				fireAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(fireAnim)
+
+				emptyfireAnim = Instance.new("Animation")
+				emptyfireAnim.Parent = framework.viewmodel
+				emptyfireAnim.Name = "Fire"
+				emptyfireAnim.AnimationId = framework.module.emptyfireAnim
+				emptyfireAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(emptyfireAnim)
+
+				equipAnim = Instance.new("Animation")
+				equipAnim.Parent = framework.viewmodel
+				equipAnim.Name = "Equip"
+				equipAnim.AnimationId = framework.module.equipAnim
+				equipAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(equipAnim)
+
+				deequipAnim = Instance.new("Animation")
+				deequipAnim.Parent = framework.viewmodel
+				deequipAnim.Name = "Deequip"
+				deequipAnim.AnimationId = framework.module.deequipAnim
+				deequipAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(deequipAnim)
+
+				reloadAnim = Instance.new("Animation")
+				reloadAnim.Parent = framework.viewmodel
+				reloadAnim.Name = "Reload"
+				reloadAnim.AnimationId = framework.module.reloadAnim
+				reloadAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(reloadAnim)
+
+				emptyReloadAnim = Instance.new("Animation")
+				emptyReloadAnim.Parent = framework.viewmodel
+				emptyReloadAnim.Name = "EmptyReload"
+				emptyReloadAnim.AnimationId = framework.module.emptyReloadAnim
+				emptyReloadAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(emptyReloadAnim)
+
+				InspectAnim = Instance.new("Animation")
+				InspectAnim.Parent = framework.viewmodel
+				InspectAnim.Name = "Inspect"
+				InspectAnim.AnimationId = framework.module.InspectAnim
+				InspectAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(InspectAnim)
+
+				idleAnim = Instance.new("Animation")
+				idleAnim.Parent = framework.viewmodel
+				idleAnim.Name = "Idle"
+				idleAnim.AnimationId = framework.module.idleAnim
+				idleAnim = framework.viewmodel.AnimationController.Animator:LoadAnimation(idleAnim)
+
+				game.ReplicatedStorage.Events.LoadSlot:FireServer(framework.module.fireSound.SoundId, framework.module.fireSound.Volume)
+
+				if framework.viewmodel then
+					for i, v in pairs(framework.viewmodel:GetDescendants()) do
+						if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
+							v.Transparency = 1
+						end
 					end
 				end
-				--Canceling
-				instructT.Text = "Error: Not a valid key"; tempJanitor:GiveChore(function() instructT.Text = InventoryClient.EquipInstructText end)
-				task.wait(2)
-				tempJanitor:Clean()
-				
-			end))
-			
-			--Button presses
-			for i, slotF: TextButton in hotbarSlots do
-				
-				tempJanitor:GiveChore(slotF.MouseButton1Click:Connect(function()
-					chosenSlot = slotF
-					slotNum = i
-					tempJanitor:Clean()
-				end))
-			end
-			
-			--Waiting for selection
-			while chosenSlot == nil do task.wait() end
-			
-			if slotNum == nil then
-				slotNum = table.find(hotbarSlots, chosenSlot)
-			end
-			
-			---Equipping
-			Signal.FireServer("InventoryServer:EquipToHotbar", slotNum, stackData.StackId)
-		end
-		
-	elseif equipB.Text == "Unequip" and stackData ~= nil then
-		if stackData.ItemType == "Armor" then
-			Signal.FireServer("InventoryServer:UnequipArmor", InventoryClient.SelectedStackId)
-		else
-			Signal.FireServer("InventoryServer:UnequipFromHotbar", InventoryClient.SelectedStackId)
-		end
-	end
-end
-function InventoryClient.OnDropButton()
-	if InventoryClient.SelectedStackId == nil then return end
-	
-	--drop an item
-	local success: boolean = Signal.InvokeServer("InventoryServer:DropItem", InventoryClient.SelectedStackId)
-	if success == nil then
-		InventoryClient.ErrorMessage("Something went wrong")
-	elseif success == false then
-		InventoryClient.ErrorMessage("You can't drop that item")
-	end
-end
 
---setting equip/unequip button
-function InventoryClient.SetEquipButton(toSet: boolean)
-	if toSet == true then
-		equipB.Text = "Equip"
-		equipB.BackgroundColor3 = equipB:GetAttribute("EquipColor")
-	else
-		equipB.Text = "Unequip"
-		equipB.BackgroundColor3 = equipB:GetAttribute("UnequipColor")
-	end
-end
+				equipAnim:Play()
 
---Toggling held item
-function InventoryClient.ToggleHold(slotNum: number)
-	if slotNum == nil then return end
-	if InventoryClient.HeldSlotNum == slotNum then
-		Signal.FireServer("InventoryServer:UnholdItems")
-		
-	else
-		Signal.FireServer("InventoryServer:HoldItem", slotNum)
-	end
-end
+				task.wait(.1)
 
+				if framework.viewmodel then
+					for i, v in pairs(framework.viewmodel:GetDescendants()) do
+						if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
+							if v.Name == "Main" or v.Name == "Muzzle" or v.Name == "FakeCamera" or v.Name == "AimPart" or v.Name == "HumanoidRootPart" then
 
---update held item
-function InventoryClient.UpdateHeldItem()
-	
-	
-	--Character variables
-	local char: Model = player.Character; if not char then return end
-	local tool: Tool = char:FindFirstChildOfClass("Tool")
-	
-	
-	--if theres a tool
-	if tool then
-		
-		--Finding slot
-		local slotNum: number = nil
-		for i = 1,8 do
-			local stackId: number? = InventoryClient.InvData.Hotbar["Slot" .. i]
-			local stackData: Types.StackData = InventoryClient.FindStackDataFromID(stackId)
-			if stackData ~= nil and table.find(stackData.Items, tool) then
-				slotNum = i
-				break
-			end
-		end
-		
-		--Updating
-		if slotNum ~= nil then
-		
-			InventoryClient.HeldSlotNum = slotNum
-			local slotF: TextButton = hotbarSlots[slotNum]
-			for i, otherSlotF: TextButton in hotbarSlots do
-				if otherSlotF == slotF then
-					otherSlotF.BackgroundColor3 = otherSlotF:GetAttribute("SelectedColor")
-				else
-					otherSlotF.BackgroundColor3 = otherSlotF:GetAttribute("NormalColor")
+							else
+								v.Transparency = 0
+							end
+						end
+					end
 				end
+
+				canShoot = true
+				canInspect = true
 			end
-		
+		end
+	end
+end
+
+function Shoot()
+	if framework.module.fireMode == "Semi" then
+		equipAnim:Stop()
+		reloadAnim:Stop()
+		emptyReloadAnim:Stop()
+		InspectAnim:Stop()
+		idleAnim:Stop()
+
+		if framework.module.ammo == 1 then
+			fireAnim:Stop()
+			emptyfireAnim:Play()
 		else
-			InventoryClient.HeldSlotNum = nil
-			Signal.FireServer("InventoryServer:UnholdItems")
-			
+			emptyfireAnim:Stop()
+			fireAnim:Play()
 		end
-		
-	else
-		--setting all slots back to normal
-		
-		for i, slotF: TextButton in hotbarSlots do
-			slotF.BackgroundColor3 = slotF:GetAttribute("NormalColor")
-			
+
+		framework.module.ammo -= 1
+
+
+		game.ReplicatedStorage.Events.Shoot:FireServer(framework.viewmodel.Muzzle.Position, mouse.Hit.p, framework.module.damage, framework.module.headshot)
+
+		if framework.module.ammo == 0 then
+			task.wait(.5)
+			Reload()
+			repeat task.wait() until emptyReloadAnim.IsPlaying == false
+			debounce = false
+		else
+			debounce = true
+
+			wait(framework.module.debounce)
+
+			debounce = false
 		end
-		InventoryClient.HeldSlotNum = nil
+	end
+
+	if framework.module.fireMode == "Full Auto" then
+		isShooting = true
 	end
 end
 
---Checking if an item is currently equipped
-function InventoryClient.CheckItemEquipped(stackData: Types.StackData): boolean
-	if stackData.ItemType == "Armor" then
-		for armorType: string, stackId: number in InventoryClient.InvData.Armor do
-			if stackId == stackData.StackId then
-				return true
-			end
-		end
-		return false
-	else
-		for slotKey: string, stackId: number in InventoryClient.InvData.Hotbar do
-			if stackId == stackData.StackId then
-				return true
-			end
-		end
-		return false
+function Inspect()
+	if canInspect then
+		idleAnim:Stop()
+		dof.FarIntensity = 1
+		dof.FocusDistance = 10.44
+		dof.InFocusRadius = 25.215
+		dof.NearIntensity = 0.183
+		InspectAnim:Play()
+
+		repeat task.wait() until InspectAnim.IsPlaying == false
+
+		dof.FarIntensity = 0.1
+		dof.FocusDistance = 0.05
+		dof.InFocusRadius = 30
+		dof.NearIntensity = 0
 	end
 end
 
---Updating Inventory Data
-function InventoryClient.UpdateInventoryData()
-	InventoryClient.InvData = Signal.InvokeServer("InventoryServer:GetInventoryData")
+function Reload()
+	if isReloading == false then
+		canShoot = false
+		canInspect = false
+		isReloading = true
+
+		fireAnim:Stop()
+		emptyfireAnim:Stop()
+		equipAnim:Stop()
+		InspectAnim:Stop()
+		idleAnim:Stop()
+
+		if framework.module.ammo > 0 then
+			reloadAnim:Play()
+		else
+			emptyReloadAnim:Play()
+		end
+
+		wait(framework.module.reloadTime)
+
+		canShoot = true
+		canInspect = true
+		isReloading = false
+		framework.module.ammo = framework.module.maxAmmo
+	end
 end
 
---updating display
-function InventoryClient.UpdateDisplay()
-	while InventoryClient.UpdatingDb do task.wait() end
-	InventoryClient.UpdatingDb = true
+local oldCamCF = CFrame.new()
+
+function updateCameraShake()
+	local newCamCF = framework.viewmodel.FakeCamera.CFrame:ToObjectSpace(framework.viewmodel.PrimaryPart.CFrame)
+	camera.CFrame = camera.CFrame * newCamCF:ToObjectSpace(oldCamCF)
+	oldCamCF = newCamCF
+end
+
+local hud = player.PlayerGui:WaitForChild("HUD")
+
+RunService.RenderStepped:Connect(function()
+
+	mouse.TargetFilter = framework.viewmodel
+
+	if humanoid then
+		local rot = camera.CFrame:ToObjectSpace(lastCameraCF)
+		local X,Y,Z = rot:ToOrientation()
+		swayCF = swayCF:Lerp(CFrame.Angles(math.sin(X) * currentSwayAMT, math.sin(Y) * currentSwayAMT, 0), .1)
+		lastCameraCF = camera.CFrame
+
+		if hud and humanoid then
+			if framework.viewmodel and framework.module then
+				hud.GunName.Text = framework.inventory[framework.currentSlot]
+				hud.Ammo.Text = framework.module.ammo
+				hud.Ammo.MaxAmmo.Text = framework.module.maxAmmo
+			end
+		end
+
+		if framework.viewmodel ~= nil and framework.module ~= nil then
+			if humanoid.MoveDirection.Magnitude > 0 then
+				if humanoid.WalkSpeed == 17 then
+					bobOffset = bobOffset:Lerp(CFrame.new(math.cos(tick() * 4) * .05, -humanoid.CameraOffset.Y/3, -humanoid.CameraOffset.Z/3) * CFrame.Angles(0, math.sin(tick() * -4) * -.05, math.cos(tick() * -4) * .05), .1)
+					isSprinting = false
+				elseif humanoid.WalkSpeed == 30 then
+					bobOffset = bobOffset:Lerp(CFrame.new(math.cos(tick() * 8) * .1, -humanoid.CameraOffset.Y/3, -humanoid.CameraOffset.Z/3) * CFrame.Angles(0, math.sin(tick() * -8) * -.1, math.cos(tick() * -8) * .1) * framework.module.sprintCF, .1)
+					isSprinting = true
+				end
+
+			else
+				bobOffset = bobOffset:Lerp(CFrame.new(0, -humanoid.CameraOffset.Y/3, 0), .1)
+				isSprinting = false
+			end
+		end
+
+		for i, v in pairs(camera:GetChildren()) do
+			if v:IsA("Model") then
+				v:SetPrimaryPartCFrame(camera.CFrame * swayCF * aimCF * bobOffset)
+				updateCameraShake()
+
+				if not fireAnim.IsPlaying and not emptyfireAnim.IsPlaying and not emptyReloadAnim.IsPlaying and not reloadAnim.IsPlaying and not InspectAnim.IsPlaying and not equipAnim.IsPlaying and not deequipAnim.IsPlaying then
+					if idleAnim.IsPlaying == false then
+						idleAnim:Play()
+					end
+				else
+					idleAnim:Stop()
+				end
+
+			end
+		end
+
+		if framework.viewmodel ~= nil then
+			if isAiming and framework.module.canAim and isSprinting == false then
+				local offset = framework.viewmodel.AimPart.CFrame:ToObjectSpace(framework.viewmodel.PrimaryPart.CFrame)
+				aimCF = aimCF:Lerp(offset, framework.module.aimSmooth)
+				currentSwayAMT = aimSwayAMT
+			else
+				local offset = CFrame.new()
+				aimCF = aimCF:Lerp(offset, framework.module.aimSmooth)
+				currentSwayAMT = swayAMT
+			end
+		end
+	end
+end)
+
+--UserInputService.MouseEnabled = false
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.One then
+		if framework.currentSlot ~= 1 and isReloading == false then
+			loadSlot(framework.inventory[1])
+			framework.currentSlot = 1
+		end
+	end
+
+	if input.KeyCode == Enum.KeyCode.Two then
+		if framework.currentSlot ~= 2 and isReloading == false then
+			loadSlot(framework.inventory[2])
+			framework.currentSlot = 2
+		end
+	end
+
+	if input.KeyCode == Enum.KeyCode.Three then
+		if framework.currentSlot ~= 3 and isReloading == false then
+			loadSlot(framework.inventory[3])
+			framework.currentSlot = 3
+		end
+	end
+
+	if input.KeyCode == Enum.KeyCode.Four then
+		if framework.currentSlot ~= 4 and isReloading == false then
+			loadSlot(framework.inventory[4])
+			framework.currentSlot = 4
+		end
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		isAiming = true
+	end
+
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if character and framework.viewmodel and framework.module and framework.module.ammo > 0 and debounce == false and isReloading ~= true and canShoot == true and invF.Visible == false then
+			Shoot()
+		end
+	end
+
+	if input.KeyCode == Enum.KeyCode.R then
+		Reload()
+	end
+
+	if input.KeyCode == Enum.KeyCode.F then
+
+
+		Inspect()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		isAiming = false
+	end
+end)
+
+game.ReplicatedStorage.Events.PlayerAdded.OnClientEvent:Connect(function(ply, char)
+
+	player = game.Players.LocalPlayer
+
+	character = player.CharacterAdded:Wait()
+
+	humanoid = character:WaitForChild("Humanoid")
+
+	framework.inventory[1] = "TROY DEFENSE AR"
+	framework.inventory[2] = "G19 ROLAND SPECIAL"
+	framework.inventory[3] = "Knife"
+	framework.inventory[4] = "Frag"
+
+	framework.module.ammo = framework.module.maxAmmo
+
+	framework.module = nil
+	framework.viewmodel = nil
+	framework.currentSlot = 1
+
+	loadSlot(framework.inventory[1])
+
+	humanoid.Died:Connect(function()
+
+		if framework.viewmodel then
+			framework.viewmodel:Destroy()
+		end
+
+		player = nil
+		character = nil
+		humanoid = nil
+
+		local aimCF = CFrame.new()
+
+		local isAiming = false
+		local isShooting = false
+		local isReloading = false
+		local isSprinting = false
+		local canShoot = true
+
+		local bobOffset = CFrame.new()
+
+		local debounce = false
+
+		local currentSwayAMT = -.3
+		local swayAMT = -.3
+		local aimSwayAMT = .2
+		local swayCF = CFrame.new()
+		local lastCameraCF = CFrame.new()
+
+		local fireAnim = nil
+	end)
+end)
+game.ReplicatedStorage.Events.EquipViewmodel.OnClientEvent:Connect(function(ply, gun)
+	print(gun)
+	loadSlot(gun)
 	
-	--clearing items
-	for i, itemF: Frame in itemsSF:GetChildren() do
-		if itemF.ClassName == "TextButton" and itemF ~= itemSample then
-			itemF:Destroy()
-		end
-	end
+end)
+
+game.ReplicatedStorage.Events.UnequipViewmodel.OnClientEvent:Connect(function(ply, gun)
 	
-	--Creating item frames
-	local inv: Types.Inventory = InventoryClient.InvData
-	for i, stackData: Types.StackData in inv.Inventory do
-		--Cloning
-		local itemF = itemSample:Clone()
-		itemF.Name = "Stack-" .. stackData.StackId
-		itemF.Image.Image = stackData.Image
-		itemF.ItemCount.Text = #stackData.Items .. "x"
-		itemF.Equipped.Visible = InventoryClient.CheckItemEquipped(stackData)
-		itemF.Parent = itemSample.Parent
-		itemF.Visible = true
-		
-		itemF.MouseButton1Click:Connect(function()
-			if InventoryClient.SelectedStackId == stackData.StackId then
-				InventoryClient.SelectItem()
-			else	
-				InventoryClient.SelectItem(stackData)
-			end
-			
+	--UNEQUIP GUN
+	
+end)
+
+
+
+
+while wait() do
+	if isShooting and framework.module.ammo > 0 and isReloading ~= true and canShoot == true then
+		equipAnim:Stop()
+		reloadAnim:Stop()
+		emptyReloadAnim:Stop()
+		InspectAnim:Stop()
+		idleAnim:Stop()
+
+		if framework.module.ammo == 1 then
+			fireAnim:Stop()
+			emptyfireAnim:Play()
+		else
+			emptyfireAnim:Stop()
+			fireAnim:Play()
+		end
+
+		framework.module.ammo -= 1
+
+
+		game.ReplicatedStorage.Events.Shoot:FireServer(framework.viewmodel.Muzzle.Position, mouse.Hit.p, framework.module.damage, framework.module.headshot)
+
+		if framework.module.ammo == 0 then
+			task.wait(.5)
+			Reload()
+		end
+
+		mouse.Button1Up:Connect(function()
+			isShooting = false
+
 		end)
-		
-	end
-	
-	
-	--update hotbar
-	for slotNum = 1, 8 do
-		--getting slot information
-		
-		local slotF: TextButton = hotbarSlots[slotNum]
-		local stackId: number? = InventoryClient.InvData.Hotbar["Slot" .. slotNum]
-		
-		--updating display of hotbar slot
-		if stackId == nil then
-			slotF.ItemCount.Visible = false
-			slotF.Image.Image = ""
-		else
-			
-			
-			local foundStack: Types.StackData = InventoryClient.FindStackDataFromID(stackId)
-			
-			--Updating information
-			if foundStack ~= nil then
-				slotF.ItemCount.Visible = true
-				slotF.ItemCount.Text = #foundStack.Items .. "x"
-				slotF.Image.Image = foundStack.Image
-			else
-				slotF.ItemCount.Visible = false
-				slotF.Image.Image = ""
-			end
-		end
-		
-	end
-	
-	--Updating armor
-	for i, armorType: string in {"Head", "Chest", "Feet"} do
-		
-		--finding slot data
-		local slotF: TextButton = armorSlots[armorType]
-		local stackId: number? = InventoryClient.InvData.Armor[armorType]
-		local stackData: Types.StackData = InventoryClient.FindStackDataFromID(stackId)
-		
-		--Updating Display
-		if stackData == nil then
-			slotF.Image.Image = ""
-		else
-			slotF.Image.Image = stackData.Image
-		end
-		
-	end
-	
-	--reselecting item
-	local selectedStack: Types.StackData? = InventoryClient.FindStackDataFromID(InventoryClient.SelectedStackId)
-	InventoryClient.SelectItem(selectedStack)
-	
-	
-	InventoryClient.UpdatingDb = false
-end
 
---selecting items
-function InventoryClient.SelectItem(stackData: Types.StackData)
-	InventoryClient.SelectedStackId = if stackData ~= nil then stackData.StackId else nil
-	
-	local itemF: TextButton? = if stackData ~= nil then itemsSF:FindFirstChild("Stack-" .. stackData.StackId) else nil
-	
-	for i, otherItemF: TextButton in itemsSF:GetChildren() do
-		if otherItemF.ClassName == "TextButton" and otherItemF ~= itemSample then
-			if otherItemF == itemF then 
-				otherItemF.BackgroundColor3 = otherItemF:GetAttribute("SelectedColor")
-			else
-				otherItemF.BackgroundColor3 = otherItemF:GetAttribute("NormalColor")
-			end
-		end
-	end 
-	
-	
-	if stackData ~= nil then
-		
-		infoF.Visible = true
-		itemNameT.Text = stackData.Name
-		itemDescT.Text = stackData.Description
-		
-		local isEquipped = InventoryClient.CheckItemEquipped(stackData)
-		InventoryClient.SetEquipButton(not isEquipped)
-		
-	else
-		infoF.Visible = false
-		InventoryClient.SetEquipButton(true)
-	end	
-end
-
---Error message
-function InventoryClient.ErrorMessage(message: string)
-	if InventoryClient.ErrorDb then return end
-	local errorJanitor = Janitor.new()
-	InventoryClient.ErrorDb = true; errorJanitor:GiveChore(function() InventoryClient.ErrorDb = false end)
-	
-	--Tweening Message
-	errorT.Text = message
-	errorT.Position = InventoryClient.ErrorPosition + UDim2.fromScale(0, -0.4)
-	errorT.UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	errorT.Visible = true; errorJanitor:GiveChore(function()
-		errorT.Visible = false
-	end)
-	
-	--tweening out
-	local tweenOut = TS:Create(errorT, TweenInfo.new(InventoryClient.ErrorTime/4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Position = InventoryClient.ErrorPosition;
-	}); errorJanitor:GiveChore(tweenOut)
-	tweenOut:Play()
-	tweenOut.Completed:Wait()
-	
-	--Waiting error time
-	task.wait(InventoryClient.ErrorTime/2)
-
-	--Tweening to be invisible
-	local tweenAway = TS:Create(errorT, TweenInfo.new( InventoryClient.ErrorTime/4, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-		TextTransparency = 1;
-		TextStrokeTransparency = 1;
-		
-	}); errorJanitor:GiveChore(tweenAway)
-	errorJanitor:GiveChore(function()
-		errorT.TextTransparency = 0
-	end)
-	tweenAway:Play()
-	tweenAway.Completed:Wait()
-	
-	--cleanup
-	errorJanitor:Clean()
+		wait(framework.module.fireRate)
+	end
 
 end
-
-
---finding stack data from id
-function InventoryClient.FindStackDataFromID(stackId: number): Types.StackData?
-	if stackId == nil then return end
-	
-	for i, stackData: Types.StackData in InventoryClient.InvData.Inventory do
-		if stackData.StackId == stackId then
-			return stackData
-		end
-	end
-end
-
-
---return
-return InventoryClient
