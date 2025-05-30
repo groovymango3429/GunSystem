@@ -7,6 +7,7 @@ local DSS = game:GetService("DataStoreService")
 local SS = game:GetService("ServerStorage")
 local RunService = game:GetService("RunService")
 local CS = game:GetService("CollectionService")
+local ToolEquippedEvent = RS:WaitForChild("ToolEquippedEvent")
 --Modules
 local Types = require(RS.Modules.Types)
 local Janitor = require(RS.Modules.Janitor)
@@ -169,7 +170,7 @@ function InventoryServer.OnPlayerAdded(player:Player)
 end
 
 function InventoryServer.OnPlayerRemoving(player: Player)
-	
+	ToolEquippedEvent:FireClient(player, nil)
 	--clearing extra data
 	InventoryServer.SaveData(player)
 	InventoryServer.Janitors[player]:Destroy()
@@ -575,9 +576,8 @@ end
 --Holding item
 function InventoryServer.HoldItem(player: Player, slotNum: number)
 	if InventoryServer.Respawning[player] then return end
-	--Finding Stack
-	local inv: Types.Inventory = InventoryServer.AllInventories[player]
-	local stackData: Types.StackData? = nil
+	local inv = InventoryServer.AllInventories[player]
+	local stackData = nil
 	for slotKey: string, stackId: number in inv.Hotbar do
 		if slotKey == "Slot" .. slotNum then
 			stackData = InventoryServer.FindStackDataFromId(player, stackId)
@@ -588,15 +588,15 @@ function InventoryServer.HoldItem(player: Player, slotNum: number)
 	--Equipping
 	InventoryServer.UnholdItems(player)
 	if stackData ~= nil then 
-		
-		--Equipping first tool in stack
 		local tool: Tool = stackData.Items[1]
 		if not player.Character then return end
 		tool.Parent = player.Character
-		
+		ToolEquippedEvent:FireClient(player, tool.Name)
+
 		--Updating Client
 		Signal.FireClient(player, "InventoryClient:Update", inv)
-		
+	else
+		ToolEquippedEvent:FireClient(player, nil)
 	end
 end
 
@@ -609,6 +609,7 @@ function InventoryServer.UnholdItems(player: Players)
 	hum:UnequipTools()
 	
 	--Update client
+	ToolEquippedEvent:FireClient(player, nil)
 	Signal.FireClient(player, "InventoryClient:Update", InventoryServer.AllInventories[player])
 end
 --Saving data
