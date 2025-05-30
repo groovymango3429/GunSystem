@@ -1,59 +1,43 @@
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-
 local humanoid = character:WaitForChild("Humanoid")
 
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-
 local camera = game.Workspace.CurrentCamera
-
 local dof = game.Lighting.DepthOfField
-
 local aimCF = CFrame.new()
-
 local mouse = player:GetMouse()
-
 local playerGui = player.PlayerGui
 local gui = playerGui:WaitForChild("Inventory")
 local invF = gui:WaitForChild("Inventory")
-
 local isAiming = false
 local isShooting = false
 local isReloading = false
 local isSprinting = false
 local canShoot = true
 local canInspect = true
-
 local bobOffset = CFrame.new()
-
 local debounce = false
-
 local currentSwayAMT = -.3
 local swayAMT = -.3
 local aimSwayAMT = .2
 local swayCF = CFrame.new()
 local lastCameraCF = CFrame.new()
-
-local fireAnim = nil
-local equipAnim = nil
-local deequipAnim = nil
-local emptyfireAnim = nil
-local reloadAnim = nil
-local emptyReloadAnim = nil
-local InspectAnim = nil
-local idleAnim = nil
+local fireAnim, equipAnim, deequipAnim, emptyfireAnim, reloadAnim, emptyReloadAnim, InspectAnim, idleAnim = nil, nil, nil, nil, nil, nil, nil, nil
 
 local framework = {
 	inventory = {
 		"TROY DEFENSE AR";
 		"G19 ROLAND SPECIAL";
-	};
-
-	module = nil;
-	viewmodel = nil;
-	currentSlot = 1; 
+	},
+	module = nil,
+	viewmodel = nil,
+	currentSlot = 1,
 }
+
+-- NEW: Track equipped tool
+local equippedTool = nil
 
 function loadSlot(Item)
 	local viewmodelFolder = game.ReplicatedStorage.Viewmodels
@@ -62,17 +46,11 @@ function loadSlot(Item)
 	canShoot = false
 	canInspect = false
 
+	-- Remove existing viewmodels and stop animations
 	for i,v in pairs(camera:GetChildren()) do
 		if v:IsA("Model") then
-			equipAnim:Stop()
-			fireAnim:Stop()
-			emptyfireAnim:Stop()
-			reloadAnim:Stop()
-			emptyReloadAnim:Stop()
-			InspectAnim:Stop()
-			idleAnim:Stop()
-			deequipAnim:Play()
-			repeat task.wait() until deequipAnim.IsPlaying == false
+			if deequipAnim then deequipAnim:Play() end
+			repeat task.wait() until deequipAnim == nil or deequipAnim.IsPlaying == false
 			v:Destroy()
 		end
 	end
@@ -85,6 +63,7 @@ function loadSlot(Item)
 			framework.viewmodel.Parent = camera
 
 			if framework.viewmodel and framework.module and character then
+				-- Setup all animations
 				fireAnim = Instance.new("Animation")
 				fireAnim.Parent = framework.viewmodel
 				fireAnim.Name = "Fire"
@@ -135,26 +114,21 @@ function loadSlot(Item)
 
 				game.ReplicatedStorage.Events.LoadSlot:FireServer(framework.module.fireSound.SoundId, framework.module.fireSound.Volume)
 
-				if framework.viewmodel then
-					for i, v in pairs(framework.viewmodel:GetDescendants()) do
-						if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
-							v.Transparency = 1
-						end
+				-- Hide parts before playing equip
+				for i, v in pairs(framework.viewmodel:GetDescendants()) do
+					if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
+						v.Transparency = 1
 					end
 				end
 
 				equipAnim:Play()
-
 				task.wait(.1)
 
-				if framework.viewmodel then
-					for i, v in pairs(framework.viewmodel:GetDescendants()) do
-						if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
-							if v.Name == "Main" or v.Name == "Muzzle" or v.Name == "FakeCamera" or v.Name == "AimPart" or v.Name == "HumanoidRootPart" then
-
-							else
-								v.Transparency = 0
-							end
+				-- Show parts after equip
+				for i, v in pairs(framework.viewmodel:GetDescendants()) do
+					if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("BasePart") then
+						if v.Name ~= "Main" and v.Name ~= "Muzzle" and v.Name ~= "FakeCamera" and v.Name ~= "AimPart" and v.Name ~= "HumanoidRootPart" then
+							v.Transparency = 0
 						end
 					end
 				end
@@ -166,7 +140,59 @@ function loadSlot(Item)
 	end
 end
 
+-- Helper: Show or hide the viewmodel based on equipped tool
+local function updateViewmodel()
+	if equippedTool and equippedTool:IsA("Tool") and equippedTool:GetAttribute("ItemType") == "Weapon" then
+		loadSlot(equippedTool.Name)
+	else
+		-- Remove any existing viewmodel and clear framework state
+		for _, v in pairs(camera:GetChildren()) do
+			if v:IsA("Model") then
+				v:Destroy()
+			end
+		end
+		framework.viewmodel = nil
+		framework.module = nil
+	end
+end
+
+-- Listen for tool equipped/unequipped on character
+local function onCharacterAdded(char)
+	-- Listen for tool equipped
+	char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child:GetAttribute("ItemType") == "Weapon" then
+			equippedTool = child
+			updateViewmodel()
+		end
+	end)
+	-- Listen for tool unequipped
+	char.ChildRemoved:Connect(function(child)
+		if child:IsA("Tool") and child:GetAttribute("ItemType") == "Weapon" then
+			equippedTool = nil
+			updateViewmodel()
+		end
+	end)
+	-- If a tool is already equipped on spawn
+	for _, child in ipairs(char:GetChildren()) do
+		if child:IsA("Tool") and child:GetAttribute("ItemType") == "Weapon" then
+			equippedTool = child
+			updateViewmodel()
+			break
+		end
+	end
+end
+
+-- Initial character setup
+onCharacterAdded(character)
+player.CharacterAdded:Connect(function(char)
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	onCharacterAdded(char)
+end)
+
+-- Gun logic functions (unchanged)
 function Shoot()
+	if not framework.module then return end
 	if framework.module.fireMode == "Semi" then
 		equipAnim:Stop()
 		reloadAnim:Stop()
@@ -184,7 +210,6 @@ function Shoot()
 
 		framework.module.ammo -= 1
 
-
 		game.ReplicatedStorage.Events.Shoot:FireServer(framework.viewmodel.Muzzle.Position, mouse.Hit.p, framework.module.damage, framework.module.headshot)
 
 		if framework.module.ammo == 0 then
@@ -194,9 +219,7 @@ function Shoot()
 			debounce = false
 		else
 			debounce = true
-
 			wait(framework.module.debounce)
-
 			debounce = false
 		end
 	end
@@ -225,7 +248,7 @@ function Inspect()
 end
 
 function Reload()
-	if isReloading == false then
+	if isReloading == false and framework.module then
 		canShoot = false
 		canInspect = false
 		isReloading = true
@@ -252,8 +275,8 @@ function Reload()
 end
 
 local oldCamCF = CFrame.new()
-
 function updateCameraShake()
+	if not framework.viewmodel then return end
 	local newCamCF = framework.viewmodel.FakeCamera.CFrame:ToObjectSpace(framework.viewmodel.PrimaryPart.CFrame)
 	camera.CFrame = camera.CFrame * newCamCF:ToObjectSpace(oldCamCF)
 	oldCamCF = newCamCF
@@ -262,8 +285,9 @@ end
 local hud = player.PlayerGui:WaitForChild("HUD")
 
 RunService.RenderStepped:Connect(function()
-
-	mouse.TargetFilter = framework.viewmodel
+	if framework.viewmodel then
+		mouse.TargetFilter = framework.viewmodel
+	end
 
 	if humanoid then
 		local rot = camera.CFrame:ToObjectSpace(lastCameraCF)
@@ -285,10 +309,9 @@ RunService.RenderStepped:Connect(function()
 					bobOffset = bobOffset:Lerp(CFrame.new(math.cos(tick() * 4) * .05, -humanoid.CameraOffset.Y/3, -humanoid.CameraOffset.Z/3) * CFrame.Angles(0, math.sin(tick() * -4) * -.05, math.cos(tick() * -4) * .05), .1)
 					isSprinting = false
 				elseif humanoid.WalkSpeed == 30 then
-					bobOffset = bobOffset:Lerp(CFrame.new(math.cos(tick() * 8) * .1, -humanoid.CameraOffset.Y/3, -humanoid.CameraOffset.Z/3) * CFrame.Angles(0, math.sin(tick() * -8) * -.1, math.cos(tick() * -8) * .1) * framework.module.sprintCF, .1)
+					bobOffset = bobOffset:Lerp(CFrame.new(math.cos(tick() * 8) * .1, -humanoid.CameraOffset.Y/3, -humanoid.CameraOffset.Z/3) * CFrame.Angles(0, math.sin(tick() * -8) * -.1, math.cos(tick() * -8) * .1), .1)
 					isSprinting = true
 				end
-
 			else
 				bobOffset = bobOffset:Lerp(CFrame.new(0, -humanoid.CameraOffset.Y/3, 0), .1)
 				isSprinting = false
@@ -307,12 +330,11 @@ RunService.RenderStepped:Connect(function()
 				else
 					idleAnim:Stop()
 				end
-
 			end
 		end
 
 		if framework.viewmodel ~= nil then
-			if isAiming and framework.module.canAim and isSprinting == false then
+			if isAiming and framework.module and framework.module.canAim and isSprinting == false then
 				local offset = framework.viewmodel.AimPart.CFrame:ToObjectSpace(framework.viewmodel.PrimaryPart.CFrame)
 				aimCF = aimCF:Lerp(offset, framework.module.aimSmooth)
 				currentSwayAMT = aimSwayAMT
@@ -325,37 +347,7 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
---UserInputService.MouseEnabled = false
-
 UserInputService.InputBegan:Connect(function(input)
-	if input.KeyCode == Enum.KeyCode.One then
-		if framework.currentSlot ~= 1 and isReloading == false then
-			loadSlot(framework.inventory[1])
-			framework.currentSlot = 1
-		end
-	end
-
-	if input.KeyCode == Enum.KeyCode.Two then
-		if framework.currentSlot ~= 2 and isReloading == false then
-			loadSlot(framework.inventory[2])
-			framework.currentSlot = 2
-		end
-	end
-
-	if input.KeyCode == Enum.KeyCode.Three then
-		if framework.currentSlot ~= 3 and isReloading == false then
-			loadSlot(framework.inventory[3])
-			framework.currentSlot = 3
-		end
-	end
-
-	if input.KeyCode == Enum.KeyCode.Four then
-		if framework.currentSlot ~= 4 and isReloading == false then
-			loadSlot(framework.inventory[4])
-			framework.currentSlot = 4
-		end
-	end
-
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		isAiming = true
 	end
@@ -371,8 +363,6 @@ UserInputService.InputBegan:Connect(function(input)
 	end
 
 	if input.KeyCode == Enum.KeyCode.F then
-
-
 		Inspect()
 	end
 end)
@@ -383,75 +373,9 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
-game.ReplicatedStorage.Events.PlayerAdded.OnClientEvent:Connect(function(ply, char)
-
-	player = game.Players.LocalPlayer
-
-	character = player.CharacterAdded:Wait()
-
-	humanoid = character:WaitForChild("Humanoid")
-
-	framework.inventory[1] = "TROY DEFENSE AR"
-	framework.inventory[2] = "G19 ROLAND SPECIAL"
-	framework.inventory[3] = "Knife"
-	framework.inventory[4] = "Frag"
-
-	framework.module.ammo = framework.module.maxAmmo
-
-	framework.module = nil
-	framework.viewmodel = nil
-	framework.currentSlot = 1
-
-	loadSlot(framework.inventory[1])
-
-	humanoid.Died:Connect(function()
-
-		if framework.viewmodel then
-			framework.viewmodel:Destroy()
-		end
-
-		player = nil
-		character = nil
-		humanoid = nil
-
-		local aimCF = CFrame.new()
-
-		local isAiming = false
-		local isShooting = false
-		local isReloading = false
-		local isSprinting = false
-		local canShoot = true
-
-		local bobOffset = CFrame.new()
-
-		local debounce = false
-
-		local currentSwayAMT = -.3
-		local swayAMT = -.3
-		local aimSwayAMT = .2
-		local swayCF = CFrame.new()
-		local lastCameraCF = CFrame.new()
-
-		local fireAnim = nil
-	end)
-end)
-game.ReplicatedStorage.Events.EquipViewmodel.OnClientEvent:Connect(function(ply, gun)
-	print(gun)
-	loadSlot(gun)
-	
-end)
-
-game.ReplicatedStorage.Events.UnequipViewmodel.OnClientEvent:Connect(function(ply, gun)
-	
-	--UNEQUIP GUN
-	
-end)
-
-
-
-
+-- Full auto mode shooting
 while wait() do
-	if isShooting and framework.module.ammo > 0 and isReloading ~= true and canShoot == true then
+	if isShooting and framework.module and framework.module.ammo > 0 and isReloading ~= true and canShoot == true then
 		equipAnim:Stop()
 		reloadAnim:Stop()
 		emptyReloadAnim:Stop()
@@ -468,7 +392,6 @@ while wait() do
 
 		framework.module.ammo -= 1
 
-
 		game.ReplicatedStorage.Events.Shoot:FireServer(framework.viewmodel.Muzzle.Position, mouse.Hit.p, framework.module.damage, framework.module.headshot)
 
 		if framework.module.ammo == 0 then
@@ -478,10 +401,8 @@ while wait() do
 
 		mouse.Button1Up:Connect(function()
 			isShooting = false
-
 		end)
 
 		wait(framework.module.fireRate)
 	end
-
 end
