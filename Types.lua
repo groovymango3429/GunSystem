@@ -35,6 +35,7 @@ export type Inventory = {
 	Hotbar: Hotbar;
 	Armor: { [string] : number};
 	NextStackId: number;
+	Money: number;
 }
 
 return Types
