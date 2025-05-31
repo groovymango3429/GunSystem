@@ -18,8 +18,10 @@ local playerGui = player.PlayerGui
 local gui = playerGui:WaitForChild("Inventory")
 local hotbarF = gui:WaitForChild("Hotbar")
 local invF = gui:WaitForChild("Inventory"); invF.Visible = false
-local invB = gui:WaitForChild("Open")
+local invB = hotbarF:WaitForChild("Open")
 local errorT = gui:WaitForChild("Error"); errorT.Visible = false
+local moneyCountLabel = hotbarF:WaitForChild("Money"):WaitForChild("MoneyCount")
+
 
 local infoF = invF:WaitForChild("ItemInfo"); --infoF.Visible = false
 local itemNameT = infoF:WaitForChild("ItemName")
@@ -98,8 +100,13 @@ function InventoryClient.Start()
 		InventoryClient.InvData = newInvData
 		InventoryClient.UpdateDisplay()
 		InventoryClient.UpdateHeldItem()
+		moneyCountLabel.Text = tostring(newInvData.Money or 0) -- Add this line
+
 	end)
 	Signal.ListenRemote("InventoryClient:ErrorMessage", InventoryClient.ErrorMessage)
+	Signal.ListenRemote("InventoryClient:UpdateMoney", function(money: number)
+		moneyCountLabel.Text = tostring(money)
+	end)
 	
 	--Open/Close
 	UIS.InputBegan:Connect(InventoryClient.OnInputBegan)
