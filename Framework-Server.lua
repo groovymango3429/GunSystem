@@ -1,10 +1,4 @@
---[[
-  Secure Server Framework for Gun System
-  - All weapon logic, validation, and damage is handled here
-  - Never trusts the client for ammo, rate, or damage
-  - Uses server-side hitscan (raycast)
---]]
-
+-- Secure Server Framework for Gun System
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -52,7 +46,7 @@ Players.PlayerRemoving:Connect(function(player)
 	PlayerWeaponState[player] = nil
 end)
 
-ReplicatedStorage.Events.Shoot.OnServerEvent:Connect(function(player, aimPos)
+ReplicatedStorage.Events.Shoot.OnServerEvent:Connect(function(player, muzzlePos, aimPos)
 	local char = player.Character
 	if not char then return end
 	local root = char:FindFirstChild("HumanoidRootPart")
@@ -70,16 +64,16 @@ ReplicatedStorage.Events.Shoot.OnServerEvent:Connect(function(player, aimPos)
 	if now - state.lastFire < config.fireRate then return end
 	if state.ammo <= 0 then return end
 
+	if typeof(muzzlePos) ~= "Vector3" then return end
+	if (muzzlePos - root.Position).Magnitude > 10 then return end
 	if typeof(aimPos) ~= "Vector3" then return end
-	local muzzle = char:FindFirstChild("Muzzle", true)
-	local origin = (muzzle and muzzle.Position) or root.Position
-	if (aimPos - origin).Magnitude > 1000 then return end
+	if (aimPos - muzzlePos).Magnitude > 1000 then return end
 
-	local direction = (aimPos - origin).Unit * 500
+	local direction = (aimPos - muzzlePos).Unit * 500
 	local rayParams = RaycastParams.new()
 	rayParams.FilterDescendantsInstances = {char}
 	rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-	local result = workspace:Raycast(origin, direction, rayParams)
+	local result = workspace:Raycast(muzzlePos, direction, rayParams)
 
 	if result and result.Instance and result.Instance.Parent then
 		local humanoid = result.Instance.Parent:FindFirstChildOfClass("Humanoid")
@@ -89,13 +83,16 @@ ReplicatedStorage.Events.Shoot.OnServerEvent:Connect(function(player, aimPos)
 		end
 	end
 
-	-- Play fire sound (optional, or inform client for FX)
-	local fireSound = Instance.new("Sound")
-	fireSound.SoundId = config.fireSound.SoundId
-	fireSound.Volume = config.fireSound.Volume
-	fireSound.Parent = char.UpperTorso or char.PrimaryPart
-	fireSound:Play()
-	game:GetService("Debris"):AddItem(fireSound, 2)
+	-- Play gun sound for other players (but NOT the shooter)
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player then
+			ReplicatedStorage.Events.PlayGunSound:FireClient(
+				otherPlayer,
+				weaponName,
+				root.Position
+			)
+		end
+	end
 
 	state.ammo = state.ammo - 1
 	state.lastFire = now
@@ -124,4 +121,17 @@ ReplicatedStorage.Events.QueryAmmo.OnServerInvoke = function(player)
 	local config = WeaponModules[weaponName]
 	local state = getWeaponState(player, weaponName)
 	return state.ammo, config.maxAmmo
+end
+
+ReplicatedStorage.Events.CanShoot.OnServerInvoke = function(player)
+	local weaponName = getEquippedWeaponName(player)
+	if not weaponName then return false end
+	local config = WeaponModules[weaponName]
+	if not config then return false end
+	local state = getWeaponState(player, weaponName)
+	if state.reloading then return false end
+	local now = tick()
+	if now - state.lastFire < config.fireRate then return false end
+	if state.ammo <= 0 then return false end
+	return true
 end
