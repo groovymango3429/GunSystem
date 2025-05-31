@@ -62,6 +62,8 @@ function InventoryServer.Start()
 	Signal.ListenRemote("InventoryServer:DropItem", InventoryServer.DropItem)
 	Signal.ListenRemote("InventoryServer:EquipArmor", InventoryServer.EquipArmor)
 	Signal.ListenRemote("InventoryServer:UnequipArmor", InventoryServer.UnequipArmor)
+	Signal.ListenRemote("InventoryServer:AddMoney", function(player, amount) InventoryServer.AddMoney(player, amount) end)
+	Signal.ListenRemote("InventoryServer:RemoveMoney", function(player, amount) InventoryServer.RemoveMoney(player, amount) end)
 	---Game shutdown
 	game:BindToClose(function()
 		for i, player: Player in Players:GetPlayers() do
@@ -106,6 +108,7 @@ function InventoryServer.OnPlayerAdded(player:Player)
 		Hotbar = {};
 		Armor = {};
 		NextStackId = 0;
+		Money = 0;
 	}
 	InventoryServer.AllInventories[player] = inv
 	janitor:GiveChore(function() InventoryServer.AllInventories[player] = nil end)
@@ -285,6 +288,33 @@ function InventoryServer.UpdateDroppedItems()
 	end
 	
 end
+-- Sends the updated money value to the client
+function InventoryServer.UpdateMoneyClient(player: Player)
+	print("Updating Money")
+	local inv = InventoryServer.AllInventories[player]
+	if not inv then return end
+
+	Signal.FireClient(player, "InventoryClient:UpdateMoney", inv.Money)
+end
+
+function InventoryServer.AddMoney(player: Player, amount: number)
+	print("Adding money" .. amount)
+	local inv = InventoryServer.AllInventories[player]
+	if not inv then print("nope") return end
+	inv.Money = (inv.Money or 0) + amount
+	print(inv.Money)
+	InventoryServer.UpdateMoneyClient(player)
+	print(inv.Money)
+end
+
+function InventoryServer.RemoveMoney(player: Player, amount: number)
+	local inv = InventoryServer.AllInventories[player]
+	if not inv then return end
+	inv.Money = math.max((inv.Money or 0) - amount, 0)
+	InventoryServer.UpdateMoneyClient(player)
+end
+
+
 
 --Registering new Items
 function InventoryServer.RegisterItem(player: Player, tool: Tool)
@@ -622,6 +652,7 @@ function InventoryServer.SaveData(player: Player)
 		Hotbar = inv.Hotbar;
 		Armor = inv.Armor;
 		NextStackId = inv.NextStackId;
+		Money = inv.Money or 0;
 	}
 	
 	for i, stackData in inv.Inventory do
@@ -677,7 +708,8 @@ function InventoryServer.LoadData(player: Player)
 		Inventory = {};
 		Hotbar = savedData.Hotbar;
 		Armor = savedData.Armor;
-		NextStackId = savedData.NextStackId
+		NextStackId = savedData.NextStackId;
+		Money = savedData.Money or 0;
 	}
 	local char: Model = player.Character or player.CharacterAdded:Wait()
 	local backpack: Backpack = player:WaitForChild("Backpack")
