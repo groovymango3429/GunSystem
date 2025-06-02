@@ -1,8 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Events = ReplicatedStorage:WaitForChild("Events")
 local boxOutlineTemplate = ReplicatedStorage.BoxOutline
 local placeableObjects = ReplicatedStorage:WaitForChild("PlaceableObjects")
-local tryPlace = ReplicatedStorage:WaitForChild("TryPlace")
-local tryDelete = ReplicatedStorage:WaitForChild("TryDelete")
+local tryPlace = Events:WaitForChild("TryPlace")
+local tryDelete = Events:WaitForChild("TryDelete")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
@@ -27,7 +28,14 @@ end
 local function castMouse()
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-	return workspace:Raycast(ray.Origin, ray.Direction * 1000)
+
+	-- Set up filter to ignore the player's own character
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	-- Assuming 'game.Players.LocalPlayer' is accessible here, otherwise pass it in
+	raycastParams.FilterDescendantsInstances = {game.Players.LocalPlayer.Character}
+
+	return workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
 end
 
 local ClientPlacer = {}
